@@ -23,57 +23,68 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-      child: StreamBuilder<QuerySnapshot>(
-        stream:
-            _db
-                .collection('alerts')
-                .where('toUid', isEqualTo: widget.user.uid)
-                .orderBy('createdAt', descending: true)
-                .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError && _cachedAlerts.isEmpty) {
-            return Center(
-              child: Text(
-                'Unable to load alerts: ${snapshot.error}',
-                textAlign: TextAlign.center,
+    return StreamBuilder<QuerySnapshot>(
+      stream: _db
+          .collection('alerts')
+          .where('toUid', isEqualTo: widget.user.uid)
+          .orderBy('createdAt', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final isLoading =
+            snapshot.connectionState == ConnectionState.waiting &&
+            _cachedAlerts.isEmpty;
+        final hasError = snapshot.hasError && _cachedAlerts.isEmpty;
+
+        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+          _cachedAlerts = snapshot.data!.docs;
+        }
+
+        return CustomScrollView(
+          slivers: [
+            if (hasError)
+              SliverFillRemaining(
+                child: Center(
+                  child: Text(
+                    'Unable to load alerts: ${snapshot.error}',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              )
+            else if (isLoading)
+              const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_cachedAlerts.isEmpty)
+              const SliverFillRemaining(
+                child: Center(child: Text('No alerts yet')),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final itemIndex = index ~/ 2;
+                      if (index.isOdd) return const SizedBox(height: 12);
+
+                      final doc = _cachedAlerts[itemIndex];
+                      final data = doc.data() as Map<String, dynamic>;
+                      final type = data['type'] as String? ?? '';
+                      final message = data['message'] as String? ?? 'Alert';
+                      final requestId = data['requestId'] as String?;
+
+                      if (type == 'partner_link_request' && requestId != null) {
+                        return _buildLinkRequestCard(doc.id, requestId, message);
+                      }
+                      return _buildAlertCard(message, type: type);
+                    },
+                    childCount: _cachedAlerts.length * 2 - 1,
+                  ),
+                ),
               ),
-            );
-          }
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              _cachedAlerts.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
-            _cachedAlerts = snapshot.data!.docs;
-          }
-
-          final alerts = _cachedAlerts;
-          if (alerts.isEmpty) {
-            return const Center(child: Text('No alerts yet'));
-          }
-
-          return ListView.separated(
-            itemCount: alerts.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final doc = alerts[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final type = data['type'] as String? ?? '';
-              final message = data['message'] as String? ?? 'Alert';
-              final requestId = data['requestId'] as String?;
-
-              if (type == 'partner_link_request' && requestId != null) {
-                return _buildLinkRequestCard(doc.id, requestId, message);
-              }
-
-              return _buildAlertCard(message, type: type);
-            },
-          );
-        },
-      ),
+          ],
+        );
+      },
     );
   }
 
@@ -187,7 +198,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),

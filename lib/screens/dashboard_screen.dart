@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import 'alerts_screen.dart';
+import 'problem_solver_screen.dart';
 import 'settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -134,70 +135,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final dayName = DateFormat('EEEE').format(now);
     final monthDay = DateFormat('MMMM d').format(now);
 
-    late final String title;
-    late final Widget content;
+    String title;
+    Widget pageBody;
 
     switch (_selectedIndex) {
       case 0:
         title = dayName;
-        content = _buildHomeContent();
+        pageBody = _buildHomeBody();
         break;
       case 1:
         title = 'Timeline';
-        content = _buildPlaceholder('Timeline');
+        pageBody = _buildTimelineBody();
         break;
       case 2:
         title = 'Alerts';
-        content = AlertsScreen(user: widget.user);
+        pageBody = AlertsScreen(user: widget.user);
         break;
       case 3:
         title = 'Settings';
-        content = SettingsScreen(user: widget.user);
+        pageBody = SettingsScreen(user: widget.user);
         break;
       default:
         title = dayName;
-        content = _buildHomeContent();
+        pageBody = _buildHomeBody();
     }
 
-    return Column(
-      children: [
-        _buildHeader(title: title, subtitle: monthDay),
-        Expanded(child: _buildPageContainer(content)),
-      ],
-    );
-  }
-
-  Widget _buildHomeContent() {
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          const SizedBox(height: 20),
-          _buildMoodSection(),
-          const SizedBox(height: 24),
-          _buildFeatureGrid(),
-          const SizedBox(height: 100),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPlaceholder(String title) {
-    return Container(
-      color: const Color(0xFFF3E8FF),
-      child: Center(
-        child: Text(
-          '$title (coming soon)',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+    return NestedScrollView(
+      headerSliverBuilder: (context, innerBoxIsScrolled) => [
+        SliverAppBar(
+          automaticallyImplyLeading: false,
+          backgroundColor: const Color(0xFF8B7FD8),
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          floating: true,
+          snap: true,
+          elevation: 0,
+          expandedHeight: 130,
+          toolbarHeight: 0,
+          flexibleSpace: FlexibleSpaceBar(
+            collapseMode: CollapseMode.none,
+            background: _buildHeaderContent(title, monthDay),
+          ),
         ),
+      ],
+      body: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFFF3E8FF),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: pageBody,
       ),
     );
   }
 
-  Widget _buildHeader({required String title, required String subtitle}) {
+  Widget _buildHeaderContent(String title, String subtitle) {
     return Padding(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Text(
             'Hello, $userName',
@@ -225,7 +225,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Text(
                     subtitle.toUpperCase(),
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.85),
+                      color: Colors.white.withValues(alpha: 0.85),
                       fontSize: 12,
                       letterSpacing: 1.5,
                     ),
@@ -235,7 +235,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               CircleAvatar(
                 radius: 24,
                 backgroundColor: Colors.white,
-                child: Icon(Icons.person, color: const Color(0xFF8B7FD8)),
+                child: const Icon(Icons.person, color: Color(0xFF8B7FD8)),
               ),
             ],
           ),
@@ -244,52 +244,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildPageContainer(Widget child) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFF3E8FF),
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(30),
-          topRight: Radius.circular(30),
+  Widget _buildHomeBody() {
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          const SizedBox(height: 20),
+          _buildMoodSection(),
+          const SizedBox(height: 24),
+          _buildFeatureGrid(),
+          const SizedBox(height: 100),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimelineBody() {
+    return const SingleChildScrollView(
+      child: SizedBox(
+        height: 500,
+        child: Center(
+          child: Text(
+            'Timeline (coming soon)',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
         ),
       ),
-      child: child,
     );
   }
 
-  Future<void> _confirmLogout() async {
-    final shouldLogout = await showDialog<bool>(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: const Text('Log out?'),
-            content: const Text('Are you sure you want to log out?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('No'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF8B7FD8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text('Yes', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          ),
-    );
-
-    if (shouldLogout == true) {
-      await FirebaseAuth.instance.signOut();
-    }
-  }
 
   Widget _buildMoodSection() {
     return Container(
@@ -410,6 +392,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const Color(0xFFF3E5F5),
             const Color(0xFF9C27B0),
           ),
+          _buildFeatureCard(
+            'Problem Solver',
+            Icons.psychology_alt,
+            const Color(0xFFEDE7F6),
+            const Color(0xFF8B7FD8),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ProblemSolverScreen(user: widget.user),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -419,17 +413,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String title,
     IconData icon,
     Color bgColor,
-    Color iconColor,
-  ) {
+    Color iconColor, {
+    VoidCallback? onTap,
+  }) {
     return GestureDetector(
-      onTap: () => _showSnack('Opening $title...'),
+      onTap: onTap ?? () => _showSnack('Coming soon: $title'),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 15,
               offset: const Offset(0, 4),
             ),
@@ -479,7 +474,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -673,16 +668,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (pUid == null) {
       if (mounted) {
         _showSnack('No partner linked to send emergency');
+        Navigator.pop(context);
       }
-      Navigator.pop(context);
       return;
     }
     await _db.collection('alerts').add({
-      'from': uid,
-      'to': pUid,
+      'fromUid': uid,
+      'toUid': pUid,
       'type': 'emergency',
-      'message': 'Emergency alert from your partner',
-      'timestamp': FieldValue.serverTimestamp(),
+      'message': 'Emergency alert from your partner!',
+      'createdAt': FieldValue.serverTimestamp(),
+      'read': false,
     });
     if (mounted) {
       Navigator.pop(context);
