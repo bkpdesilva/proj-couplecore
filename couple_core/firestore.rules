@@ -1,0 +1,90 @@
+rules_version = '2';
+
+// CoupleCore Firestore security rules (SRS §3.3 / §3.4, NFR-5).
+//
+// Three scopes:
+//   users/{uid}                -> owner only
+//   users/{uid}/private/**     -> owner only
+//   couples/{coupleId}/**      -> only the two members in memberUids
+//
+// Partner linking (FR-8/9/11) never writes into the *other* user's users/{uid}
+// doc — each client only ever writes its own doc, driven by what it observes on
+// the shared couples/{coupleId} doc. That keeps "users/{uid}: owner-only" an
+// absolute rule with no linking-flow exception. See InviteService/CoupleService.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isMember(memberUids) {
+      return isSignedIn() && request.auth.uid in memberUids;
+    }
+
+    match /users/{uid} {
+      allow read, create, update: if isOwner(uid);
+      allow delete: if false;
+
+      match /private/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // invites/{code}: possession of the code is the authorization to redeem it,
+    // like any invite link — but the collection itself must never be listable,
+    // or any signed-in user could enumerate every pending invite (and its
+    // fromUid) in the app.
+    match /invites/{code} {
+      allow get: if isSignedIn();
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+        request.resource.data.fromUid == request.auth.uid &&
+        request.resource.data.status == 'pending';
+
+      // Creator may only flip status (e.g. to cancel). A *different* signed-in
+      // user may redeem a still-pending invite by flipping it to accepted and
+      // stamping their own uid — nothing else.
+      allow update: if isSignedIn() && (
+        (
+          resource.data.fromUid == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        ) ||
+        (
+          resource.data.fromUid != request.auth.uid &&
+          resource.data.status == 'pending' &&
+          request.resource.data.status == 'accepted' &&
+          request.resource.data.acceptedByUid == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'acceptedByUid', 'acceptedAt'])
+        )
+      );
+
+      allow delete: if isSignedIn() && resource.data.fromUid == request.auth.uid;
+    }
+
+    // couples/{coupleId}/**: shared scope, members only. The array-contains
+    // query CoupleService uses to find "my couple" is Firestore's documented
+    // safe pattern for this exact resource.data-conditioned rule.
+    match /couples/{coupleId} {
+      allow read: if isMember(resource.data.memberUids);
+
+      allow create: if isSignedIn() &&
+        request.resource.data.memberUids.size() == 2 &&
+        request.auth.uid in request.resource.data.memberUids;
+
+      allow update, delete: if isMember(resource.data.memberUids);
+
+      match /{document=**} {
+        allow read, write: if isMember(
+          get(/databases/$(database)/documents/couples/$(coupleId)).data.memberUids
+        );
+      }
+    }
+  }
+}
