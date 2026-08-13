@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "772173379670",
+    "project_id": "couplecore-bae2e",
+    "storage_bucket": "couplecore-bae2e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:772173379670:android:5e7735315812003c08e3f7",
+        "android_client_info": {
+          "package_name": "com.example.couple_core"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBeWtNxkB_29O7_L-J1C9FNLyl2b8iwiDs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
