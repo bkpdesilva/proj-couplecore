@@ -19,10 +19,10 @@ class CoupleService {
         .limit(1)
         .snapshots()
         .map((snap) {
-      if (snap.docs.isEmpty) return null;
-      final doc = snap.docs.first;
-      return Couple.fromMap(doc.id, doc.data());
-    });
+          if (snap.docs.isEmpty) return null;
+          final doc = snap.docs.first;
+          return Couple.fromMap(doc.id, doc.data());
+        });
   }
 
   /// Completes mutual confirmation (FR-11): flips a pending couple to active.
@@ -46,6 +46,28 @@ class CoupleService {
       }
       await batch.commit();
     }
+    await _deleteProblemSessions(couple);
     await couple.delete();
+  }
+
+  /// problemSessions carry a nested messages/ subcollection, so each
+  /// session's messages must be cleared before the session doc itself.
+  Future<void> _deleteProblemSessions(
+    DocumentReference<Map<String, dynamic>> couple,
+  ) async {
+    final sessions =
+        await couple.collection(FirestorePaths.problemSessions).get();
+    for (final session in sessions.docs) {
+      final messages =
+          await session.reference.collection(FirestorePaths.messages).get();
+      if (messages.docs.isNotEmpty) {
+        final batch = _db.batch();
+        for (final message in messages.docs) {
+          batch.delete(message.reference);
+        }
+        await batch.commit();
+      }
+      await session.reference.delete();
+    }
   }
 }
