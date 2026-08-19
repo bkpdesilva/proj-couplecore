@@ -7,4 +7,8 @@ class FirestorePaths {
   // couples/{coupleId}/** subcollections
   static const moods = 'moods';
   static const alerts = 'alerts';
+  static const problemSessions = 'problemSessions';
+
+  // couples/{coupleId}/problemSessions/{id}/** subcollections
+  static const messages = 'messages';
 }
