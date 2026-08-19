@@ -18,7 +18,12 @@ class AuthService {
   AuthService(this._auth);
 
   final FirebaseAuth _auth;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  GoogleSignIn? _googleSignInInstance;
+
+  /// Lazy: constructing [GoogleSignIn] eagerly triggers its web
+  /// initialization immediately, which throws if no OAuth client ID is
+  /// configured — even for users who never tap "Sign in with Google".
+  GoogleSignIn get _googleSignIn => _googleSignInInstance ??= GoogleSignIn();
 
   Stream<User?> authStateChanges() => _auth.authStateChanges();
 
@@ -79,7 +84,9 @@ class AuthService {
   }
 
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
+    if (_googleSignInInstance != null) {
+      await _googleSignInInstance!.signOut();
+    }
     await _auth.signOut();
   }
 
