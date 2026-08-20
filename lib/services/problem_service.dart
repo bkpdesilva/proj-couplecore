@@ -110,14 +110,24 @@ class ProblemService {
         .toList();
   }
 
+  /// [problemSummary]/[solution]/[tags] are the AI-generated record from
+  /// [AiCounselorService.summarize] — optional, since summarization is
+  /// skipped for short sessions or can fail without blocking the solve.
   Future<void> markSolved({
     required String coupleId,
     required String sessionId,
+    String? problemSummary,
+    String? solution,
+    List<String>? tags,
   }) {
-    return sessionDoc(
-      coupleId,
-      sessionId,
-    ).update({'status': 'solved', 'solvedAt': FieldValue.serverTimestamp()});
+    final updates = <String, dynamic>{
+      'status': 'solved',
+      'solvedAt': FieldValue.serverTimestamp(),
+    };
+    if (problemSummary != null) updates['problemSummary'] = problemSummary;
+    if (solution != null) updates['solution'] = solution;
+    if (tags != null) updates['tags'] = tags;
+    return sessionDoc(coupleId, sessionId).update(updates);
   }
 
   Future<void> unmarkSolved({

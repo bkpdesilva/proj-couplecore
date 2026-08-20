@@ -11,6 +11,9 @@ class ProblemSession {
     required this.createdByUid,
     this.lastMessage = '',
     this.solvedAt,
+    this.problemSummary,
+    this.solution,
+    this.tags = const [],
   });
 
   final String id;
@@ -21,6 +24,13 @@ class ProblemSession {
   final String createdByUid;
   final String lastMessage;
   final Timestamp? solvedAt;
+
+  /// AI-generated on solve (FR-48) — null for sessions solved before this
+  /// existed, or where the summarize call failed. Always present as a pair:
+  /// see [AiCounselorService.summarize].
+  final String? problemSummary;
+  final String? solution;
+  final List<String> tags;
 
   bool get isActive => status == 'active';
   bool get isSolved => status == 'solved';
@@ -41,6 +51,9 @@ class ProblemSession {
       createdByUid: data['createdByUid'] as String? ?? '',
       lastMessage: data['lastMessage'] as String? ?? '',
       solvedAt: data['solvedAt'] as Timestamp?,
+      problemSummary: data['problemSummary'] as String?,
+      solution: data['solution'] as String?,
+      tags: (data['tags'] as List?)?.cast<String>() ?? const [],
     );
   }
 }

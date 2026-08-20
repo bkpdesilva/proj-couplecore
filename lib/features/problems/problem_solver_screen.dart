@@ -5,6 +5,7 @@ import '../../core/providers.dart';
 import '../../core/theme.dart';
 import '../../models/chat_message.dart';
 import '../../models/problem_session.dart';
+import '../../services/ai_counselor_service.dart';
 import 'solved_problems_screen.dart';
 
 const _kBackground = Color(0xFFF3E8FF);
@@ -277,13 +278,39 @@ class _ActiveSessionActions extends ConsumerWidget {
             ],
           ),
     );
-    if (confirm == true) {
-      await ref
-          .read(problemServiceProvider)
-          .markSolved(coupleId: coupleId, sessionId: active.id);
+    if (confirm != true) return;
+
+    final messages =
+        ref
+            .read(
+              problemMessagesProvider((
+                coupleId: coupleId,
+                sessionId: active.id,
+              )),
+            )
+            .valueOrNull ??
+        const [];
+
+    // Too little to summarize meaningfully (e.g. only the opening message,
+    // no exchange yet) — skip the AI call and just mark solved.
+    ProblemSummary? summary;
+    if (messages.length >= _kMinMessagesToSummarize) {
+      summary = await ref.read(aiCounselorServiceProvider).summarize(messages);
     }
+
+    await ref
+        .read(problemServiceProvider)
+        .markSolved(
+          coupleId: coupleId,
+          sessionId: active.id,
+          problemSummary: summary?.problemSummary,
+          solution: summary?.solution,
+          tags: summary?.tags,
+        );
   }
 }
+
+const _kMinMessagesToSummarize = 2;
 
 class _ActiveCoupleBody extends ConsumerWidget {
   const _ActiveCoupleBody({
