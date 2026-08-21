@@ -5,16 +5,44 @@ import '../../core/providers.dart';
 import '../../core/theme.dart';
 import '../../models/chat_message.dart';
 import '../../models/problem_session.dart';
+import 'chats_list_screen.dart';
 import 'solved_problems_screen.dart';
 
 const _kBackground = Color(0xFFF3E8FF);
 const _kBubbleFromPartner = Color(0xFFE8E0F7);
 
+/// Which session a screen showing "the" chat should display: either a
+/// specific one (opened from the Chats list) or, when null, whichever is
+/// active and most recently updated — the original single-current-chat
+/// behavior, unchanged for every entry point except the Chats list.
+ProblemSession? _resolveSession(
+  List<ProblemSession> sessions,
+  String? overrideId,
+) {
+  if (overrideId != null) {
+    for (final s in sessions) {
+      if (s.id == overrideId) return s;
+    }
+    return null;
+  }
+  final activeSessions = sessions.where((s) => s.isActive);
+  return activeSessions.isEmpty ? null : activeSessions.first;
+}
+
 /// FR-47/48: log a problem with your partner and get AI-assisted
 /// communication tips as you talk it through, using the couple's own
 /// problem-solving history for context.
+///
+/// With [initialSessionId] null (the normal entry point, e.g. the dashboard
+/// tile), shows whichever session is active and most recently updated, as
+/// before. Passing a specific id (from [ChatsListScreen]) opens that exact
+/// session instead — full history, same working input bar — so any of the
+/// couple's surviving chats is reachable and continuable, not just the one
+/// the app would otherwise auto-pick.
 class ProblemSolverScreen extends ConsumerStatefulWidget {
-  const ProblemSolverScreen({super.key});
+  const ProblemSolverScreen({super.key, this.initialSessionId});
+
+  final String? initialSessionId;
 
   @override
   ConsumerState<ProblemSolverScreen> createState() =>
@@ -55,7 +83,12 @@ class _ProblemSolverScreenState extends ConsumerState<ProblemSolverScreen> {
         elevation: 0,
         actions:
             couple != null && couple.isActive && myUid != null
-                ? [_ActiveSessionActions(coupleId: couple.id)]
+                ? [
+                  _ActiveSessionActions(
+                    coupleId: couple.id,
+                    sessionIdOverride: widget.initialSessionId,
+                  ),
+                ]
                 : null,
       ),
       body:
@@ -66,6 +99,7 @@ class _ProblemSolverScreenState extends ConsumerState<ProblemSolverScreen> {
               : _ActiveCoupleBody(
                 coupleId: couple.id,
                 myUid: myUid,
+                sessionIdOverride: widget.initialSessionId,
                 messageController: _messageController,
                 scrollController: _scrollController,
                 isLoadingAI: _isLoadingAI,
@@ -113,6 +147,23 @@ class _ProblemSolverScreenState extends ConsumerState<ProblemSolverScreen> {
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
             onTap: () => Navigator.pop(context),
+          ),
+          const Divider(indent: 16, endIndent: 16),
+          ListTile(
+            leading: const Icon(Icons.forum_outlined, color: AppTheme.primary),
+            title: const Text(
+              'Chats',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ChatsListScreen(coupleId: coupleId),
+                ),
+              );
+            },
           ),
           const Divider(indent: 16, endIndent: 16),
           ListTile(
@@ -170,16 +221,16 @@ class _ProblemSolverScreenState extends ConsumerState<ProblemSolverScreen> {
 /// AppBar actions that depend on there being an active session — split out
 /// so it can watch [problemSessionsProvider] independently of the Scaffold.
 class _ActiveSessionActions extends ConsumerWidget {
-  const _ActiveSessionActions({required this.coupleId});
+  const _ActiveSessionActions({required this.coupleId, this.sessionIdOverride});
 
   final String coupleId;
+  final String? sessionIdOverride;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final sessions =
         ref.watch(problemSessionsProvider(coupleId)).valueOrNull ?? const [];
-    final activeSessions = sessions.where((s) => s.isActive);
-    final active = activeSessions.isEmpty ? null : activeSessions.first;
+    final active = _resolveSession(sessions, sessionIdOverride);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -426,6 +477,7 @@ class _ActiveCoupleBody extends ConsumerWidget {
   const _ActiveCoupleBody({
     required this.coupleId,
     required this.myUid,
+    this.sessionIdOverride,
     required this.messageController,
     required this.scrollController,
     required this.isLoadingAI,
@@ -434,6 +486,7 @@ class _ActiveCoupleBody extends ConsumerWidget {
 
   final String coupleId;
   final String myUid;
+  final String? sessionIdOverride;
   final TextEditingController messageController;
   final ScrollController scrollController;
   final bool isLoadingAI;
@@ -446,8 +499,7 @@ class _ActiveCoupleBody extends ConsumerWidget {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final activeSessions = sessions.where((s) => s.isActive);
-    final active = activeSessions.isEmpty ? null : activeSessions.first;
+    final active = _resolveSession(sessions, sessionIdOverride);
 
     return Column(
       children: [
@@ -478,6 +530,34 @@ class _ActiveCoupleBody extends ConsumerWidget {
   }
 
   Widget _buildEmptyState(WidgetRef ref) {
+    // A specific session was requested (from the Chats list) but isn't
+    // found anymore — e.g. auto-evicted between opening the list and
+    // tapping it. Distinct from "no active problem yet" so we don't offer
+    // "Start New Problem" as if it were the same situation.
+    if (sessionIdOverride != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.link_off, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              const Text(
+                'This chat is no longer available',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'It may have been solved or removed.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
