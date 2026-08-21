@@ -89,21 +89,32 @@ class ProblemService {
   /// oldest-created first. Saves nothing — no extraction, no LLM call; this
   /// is pure discard, unlike the Solve flow. Only ever queries/deletes
   /// couples/{coupleId}/problemSessions — never touches solvedProblems.
-  /// Excludes any session with status 'solved' as a safety net, though in
-  /// practice the Solve flow never leaves one behind to find here. Reuses
-  /// [deleteSession] so messages are cascade-deleted, same as any other
-  /// session deletion. Best-effort throughout: a failure here (network,
-  /// permissions, a session already gone) must never block session
-  /// creation, so every failure mode is swallowed after being skipped.
+  ///
+  /// Eligibility is filtered BEFORE the newest-5 cutoff is applied, not
+  /// after: solved sessions (safety net — the Solve flow never leaves one
+  /// behind to find here) and starred sessions are excluded from the
+  /// eligible list first, then the 5 newest of what's left are kept. A
+  /// starred session therefore never occupies one of the 5 slots and never
+  /// ages into deletion, no matter how old it gets.
+  ///
+  /// Reuses [deleteSession] so messages are cascade-deleted, same as any
+  /// other session deletion. Best-effort throughout: a failure here
+  /// (network, permissions, a session already gone) must never block
+  /// session creation, so every failure mode is swallowed after being
+  /// skipped.
   Future<void> _evictOldNormalSessions(String coupleId) async {
     try {
       final snap =
           await _sessionsRef(
             coupleId,
           ).orderBy('createdAt', descending: true).get();
-      final toEvict = snap.docs
-          .skip(_kMaxNormalSessions)
-          .where((d) => (d.data()['status'] as String?) != 'solved');
+      final eligible = snap.docs.where((d) {
+        final data = d.data();
+        final isSolved = (data['status'] as String?) == 'solved';
+        final isStarred = (data['starred'] as bool?) == true;
+        return !isSolved && !isStarred;
+      });
+      final toEvict = eligible.skip(_kMaxNormalSessions);
       for (final doc in toEvict) {
         try {
           await deleteSession(coupleId: coupleId, sessionId: doc.id);
@@ -114,6 +125,16 @@ class ProblemService {
     } catch (_) {
       // Best-effort — must never block session creation.
     }
+  }
+
+  /// Toggles the star that protects a session from newest-5 auto-eviction
+  /// (see [_evictOldNormalSessions]) — independent of solved/active status.
+  Future<void> setStarred({
+    required String coupleId,
+    required String sessionId,
+    required bool starred,
+  }) {
+    return sessionDoc(coupleId, sessionId).update({'starred': starred});
   }
 
   Future<void> addMessage({

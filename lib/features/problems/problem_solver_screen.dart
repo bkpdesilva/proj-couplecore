@@ -186,6 +186,15 @@ class _ActiveSessionActions extends ConsumerWidget {
       children: [
         if (active != null)
           IconButton(
+            icon: Icon(
+              active.isStarred ? Icons.star : Icons.star_border,
+              color: Colors.white,
+            ),
+            tooltip: active.isStarred ? 'Remove from kept' : 'Keep this chat',
+            onPressed: () => _toggleStarred(context, ref, active),
+          ),
+        if (active != null)
+          IconButton(
             icon: const Icon(Icons.check_circle_outline, color: Colors.white),
             tooltip: 'Mark as Solved',
             onPressed: () => _confirmSolve(context, ref, active),
@@ -197,6 +206,29 @@ class _ActiveSessionActions extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  /// Toggles the star that protects this session from newest-5 auto-
+  /// eviction. Purely a Firestore write — the icon reflects the new state
+  /// live via the same [problemSessionsProvider] stream this widget watches.
+  Future<void> _toggleStarred(
+    BuildContext context,
+    WidgetRef ref,
+    ProblemSession active,
+  ) async {
+    final newValue = !active.isStarred;
+    await ref
+        .read(problemServiceProvider)
+        .setStarred(
+          coupleId: coupleId,
+          sessionId: active.id,
+          starred: newValue,
+        );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(newValue ? 'Chat kept' : 'No longer kept')),
+      );
+    }
   }
 
   Future<void> _confirmNewSession(

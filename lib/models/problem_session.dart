@@ -14,6 +14,7 @@ class ProblemSession {
     this.problemSummary,
     this.solution,
     this.tags = const [],
+    this.starred,
   });
 
   final String id;
@@ -32,8 +33,14 @@ class ProblemSession {
   final String? solution;
   final List<String> tags;
 
+  /// Protects this session from newest-5 auto-eviction — set via
+  /// [ProblemService.setStarred]. Missing on the doc == false, hence the
+  /// nullable-with-getter pattern.
+  final bool? starred;
+
   bool get isActive => status == 'active';
   bool get isSolved => status == 'solved';
+  bool get isStarred => starred == true;
 
   factory ProblemSession.fromMap(String id, Map<String, dynamic>? data) {
     if (data == null) {
@@ -54,6 +61,7 @@ class ProblemSession {
       problemSummary: data['problemSummary'] as String?,
       solution: data['solution'] as String?,
       tags: (data['tags'] as List?)?.cast<String>() ?? const [],
+      starred: data['starred'] as bool?,
     );
   }
 }
