@@ -61,6 +61,12 @@ class ProblemService {
         );
   }
 
+  /// Normal (unsolved) sessions kept per couple — the oldest beyond this
+  /// are auto-evicted right after a new one is created. Solved chats don't
+  /// count against this: the Solve flow already deletes their raw session
+  /// as soon as it's saved to solvedProblems, so they never accumulate here.
+  static const _kMaxNormalSessions = 5;
+
   Future<String> startSession({
     required String coupleId,
     required String createdByUid,
@@ -75,7 +81,39 @@ class ProblemService {
       'updatedAt': FieldValue.serverTimestamp(),
       'lastMessage': '',
     });
+    await _evictOldNormalSessions(coupleId);
     return ref.id;
+  }
+
+  /// Hard-deletes the oldest normal sessions beyond [_kMaxNormalSessions],
+  /// oldest-created first. Saves nothing — no extraction, no LLM call; this
+  /// is pure discard, unlike the Solve flow. Only ever queries/deletes
+  /// couples/{coupleId}/problemSessions — never touches solvedProblems.
+  /// Excludes any session with status 'solved' as a safety net, though in
+  /// practice the Solve flow never leaves one behind to find here. Reuses
+  /// [deleteSession] so messages are cascade-deleted, same as any other
+  /// session deletion. Best-effort throughout: a failure here (network,
+  /// permissions, a session already gone) must never block session
+  /// creation, so every failure mode is swallowed after being skipped.
+  Future<void> _evictOldNormalSessions(String coupleId) async {
+    try {
+      final snap =
+          await _sessionsRef(
+            coupleId,
+          ).orderBy('createdAt', descending: true).get();
+      final toEvict = snap.docs
+          .skip(_kMaxNormalSessions)
+          .where((d) => (d.data()['status'] as String?) != 'solved');
+      for (final doc in toEvict) {
+        try {
+          await deleteSession(coupleId: coupleId, sessionId: doc.id);
+        } catch (_) {
+          // Best-effort — leave this one for the next eviction pass.
+        }
+      }
+    } catch (_) {
+      // Best-effort — must never block session creation.
+    }
   }
 
   Future<void> addMessage({
