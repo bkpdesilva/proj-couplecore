@@ -49,7 +49,7 @@ class AiCounselorService {
             .toList();
 
     final model = GenerativeModel(
-      model: _modelName,
+      model: 'gemini-3.6-flash',
       apiKey: kGeminiApiKey,
       systemInstruction: Content.system(
         '$_systemPreamble${_pastContext(recentSolved)}',
