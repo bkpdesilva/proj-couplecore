@@ -4,13 +4,22 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 
 import '../core/secrets.dart';
 import '../models/chat_message.dart';
-import '../models/problem_session.dart';
+import '../models/solved_problem.dart';
 
 /// The structured record [AiCounselorService.summarize] produces for a
 /// solved problem — deliberately just a couple of sentences plus tags, never
 /// the full transcript (NFR-6, minimal context).
+///
+/// Superseded by [SolvedRecord]/[extractSolvedRecord] for the current solve
+/// flow, which deletes the source session instead of marking it solved in
+/// place — left here only for any pre-existing sessions using the old path.
 typedef ProblemSummary =
     ({String problemSummary, String solution, List<String> tags});
+
+/// The structured record [AiCounselorService.extractSolvedRecord] produces
+/// when a problem is solved — persisted to solvedProblems, then the raw chat
+/// is deleted, so this (plus [sourceTitle]) is all that survives (NFR-6).
+typedef SolvedRecord = ({String problem, String solution, String impact});
 
 /// FR-48: sends the couple's problem context to Gemini and returns tailored
 /// communication tips / calming steps.
@@ -36,7 +45,7 @@ class AiCounselorService {
   Future<String> reply({
     required String message,
     required List<ChatMessage> priorMessages,
-    required List<ProblemSession> recentSolved,
+    required List<SolvedProblem> recentSolved,
   }) async {
     final history =
         priorMessages
@@ -125,15 +134,66 @@ $transcript
     return text.substring(start, end + 1);
   }
 
-  String _pastContext(List<ProblemSession> recentSolved) {
+  /// FR-48: on Solve, extract a structured problem/solution/impact record
+  /// from the session's messages. Returns null on any failure (bad/missing
+  /// JSON, network error, empty fields) — the caller must show an error and
+  /// leave the chat untouched rather than save a blank record or delete it.
+  Future<SolvedRecord?> extractSolvedRecord(List<ChatMessage> messages) async {
+    final transcript = messages
+        .map(
+          (m) =>
+              '${m.isFromAi ? 'Counselor' : (m.senderName.isEmpty ? 'Partner' : m.senderName)}: ${m.content}',
+        )
+        .join('\n');
+
+    final model = GenerativeModel(model: _modelName, apiKey: kGeminiApiKey);
+    final prompt = '''
+Summarize this couple's problem-solving conversation as it is being marked
+solved. Respond with strict JSON only — no markdown fences, no commentary,
+nothing outside the object — matching exactly this shape:
+{"problem": "...", "solution": "...", "impact": "..."}
+
+- problem: one or two sentences describing the problem that was raised.
+- solution: one or two sentences describing how it was resolved or what was
+  agreed, based only on what is in the conversation below.
+- impact: one sentence on how this affected the couple or their
+  relationship, based only on what is in the conversation below.
+
+Conversation:
+$transcript
+''';
+
+    try {
+      final response = await model.generateContent([Content.text(prompt)]);
+      final text = response.text;
+      if (text == null) return null;
+
+      final jsonText = _extractJsonObject(text);
+      if (jsonText == null) return null;
+
+      final decoded = jsonDecode(jsonText) as Map<String, dynamic>;
+      final problem = decoded['problem'] as String?;
+      final solution = decoded['solution'] as String?;
+      final impact = decoded['impact'] as String?;
+
+      if (problem == null ||
+          problem.isEmpty ||
+          solution == null ||
+          solution.isEmpty ||
+          impact == null ||
+          impact.isEmpty) {
+        return null;
+      }
+      return (problem: problem, solution: solution, impact: impact);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _pastContext(List<SolvedProblem> recentSolved) {
     if (recentSolved.isEmpty) return '';
     final lines = recentSolved
-        .map(
-          (s) =>
-              s.problemSummary != null && s.solution != null
-                  ? '- ${s.problemSummary} Resolved by: ${s.solution}'
-                  : '- ${s.title}: ${s.lastMessage}',
-        )
+        .map((s) => '- ${s.problem} Resolved by: ${s.solution}')
         .join('\n');
     return '\n\nPrevious solved problems from this couple (use for context '
         'to give personalised advice):\n$lines';

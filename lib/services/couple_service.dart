@@ -47,6 +47,14 @@ class CoupleService {
       await batch.commit();
     }
     await _deleteProblemSessions(couple);
+    final solved = await couple.collection(FirestorePaths.solvedProblems).get();
+    if (solved.docs.isNotEmpty) {
+      final batch = _db.batch();
+      for (final doc in solved.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    }
     await couple.delete();
   }
 

@@ -5,7 +5,6 @@ import '../../core/providers.dart';
 import '../../core/theme.dart';
 import '../../models/chat_message.dart';
 import '../../models/problem_session.dart';
-import '../../services/ai_counselor_service.dart';
 import 'solved_problems_screen.dart';
 
 const _kBackground = Color(0xFFF3E8FF);
@@ -189,7 +188,7 @@ class _ActiveSessionActions extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.check_circle_outline, color: Colors.white),
             tooltip: 'Mark as Solved',
-            onPressed: () => _confirmMarkSolved(context, ref, active),
+            onPressed: () => _confirmSolve(context, ref, active),
           ),
         IconButton(
           icon: const Icon(Icons.edit_note, color: Colors.white),
@@ -244,12 +243,46 @@ class _ActiveSessionActions extends ConsumerWidget {
         .startSession(coupleId: coupleId, createdByUid: myUid);
   }
 
-  Future<void> _confirmMarkSolved(
+  /// FR-48 solve flow: extract a structured record via Gemini, let the user
+  /// confirm it, save it, and only then delete the raw chat. Any failure
+  /// (extraction, save) or a Cancel leaves the session completely untouched
+  /// — deletion only ever runs after a confirmed, successful save.
+  Future<void> _confirmSolve(
     BuildContext context,
     WidgetRef ref,
     ProblemSession active,
   ) async {
-    final confirm = await showDialog<bool>(
+    final problemService = ref.read(problemServiceProvider);
+    final messages =
+        ref
+            .read(
+              problemMessagesProvider((
+                coupleId: coupleId,
+                sessionId: active.id,
+              )),
+            )
+            .valueOrNull ??
+        const [];
+
+    final record = await ref
+        .read(aiCounselorServiceProvider)
+        .extractSolvedRecord(messages);
+    if (record == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Couldn't summarize this chat — try again once there's a bit more back-and-forth.",
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!context.mounted) return;
+    final confirmed = await showDialog<bool>(
       context: context,
       builder:
           (ctx) => AlertDialog(
@@ -257,8 +290,23 @@ class _ActiveSessionActions extends ConsumerWidget {
               borderRadius: BorderRadius.circular(16),
             ),
             title: const Text('Mark as Solved?'),
-            content: const Text(
-              'This moves the problem to your Solved Problems history.',
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _SolveRecordField(label: 'Problem', value: record.problem),
+                  const SizedBox(height: 12),
+                  _SolveRecordField(label: 'Solution', value: record.solution),
+                  const SizedBox(height: 12),
+                  _SolveRecordField(label: 'Impact', value: record.impact),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Confirming saves this summary and removes the chat.',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -271,46 +319,76 @@ class _ActiveSessionActions extends ConsumerWidget {
                   backgroundColor: const Color(0xFF1BAE5D),
                 ),
                 child: const Text(
-                  'Mark Solved',
+                  'Confirm',
                   style: TextStyle(color: Colors.white),
                 ),
               ),
             ],
           ),
     );
-    if (confirm != true) return;
+    if (confirmed != true) return;
 
-    final messages =
-        ref
-            .read(
-              problemMessagesProvider((
-                coupleId: coupleId,
-                sessionId: active.id,
-              )),
-            )
-            .valueOrNull ??
-        const [];
-
-    // Too little to summarize meaningfully (e.g. only the opening message,
-    // no exchange yet) — skip the AI call and just mark solved.
-    ProblemSummary? summary;
-    if (messages.length >= _kMinMessagesToSummarize) {
-      summary = await ref.read(aiCounselorServiceProvider).summarize(messages);
+    try {
+      await problemService.saveSolvedProblem(
+        coupleId: coupleId,
+        sourceTitle: active.title,
+        problem: record.problem,
+        solution: record.solution,
+        impact: record.impact,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not save — problem left active. ($e)'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
     }
 
-    await ref
-        .read(problemServiceProvider)
-        .markSolved(
-          coupleId: coupleId,
-          sessionId: active.id,
-          problemSummary: summary?.problemSummary,
-          solution: summary?.solution,
-          tags: summary?.tags,
-        );
+    await problemService.deleteSession(
+      coupleId: coupleId,
+      sessionId: active.id,
+    );
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Problem solved and saved!'),
+          backgroundColor: Color(0xFF1BAE5D),
+        ),
+      );
+    }
   }
 }
 
-const _kMinMessagesToSummarize = 2;
+class _SolveRecordField extends StatelessWidget {
+  const _SolveRecordField({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 12,
+            color: AppTheme.primary,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(value, style: const TextStyle(fontSize: 14)),
+      ],
+    );
+  }
+}
 
 class _ActiveCoupleBody extends ConsumerWidget {
   const _ActiveCoupleBody({

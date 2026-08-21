@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/chat_message.dart';
 import '../models/problem_session.dart';
+import '../models/solved_problem.dart';
 import 'firestore_paths.dart';
 
 /// FR-47/48: AI-assisted problem-solving sessions, scoped per couple.
@@ -24,6 +25,13 @@ class ProblemService {
     String coupleId,
     String sessionId,
   ) => sessionDoc(coupleId, sessionId).collection(FirestorePaths.messages);
+
+  CollectionReference<Map<String, dynamic>> _solvedProblemsRef(
+    String coupleId,
+  ) => _db
+      .collection(FirestorePaths.couples)
+      .doc(coupleId)
+      .collection(FirestorePaths.solvedProblems);
 
   /// All sessions, newest-updated first. Providers/UI split this into the
   /// active session and the solved history client-side — per-couple session
@@ -91,28 +99,56 @@ class ProblemService {
     });
   }
 
-  /// Recently solved sessions for this couple — sent to the AI as light
+  /// Recently solved problems for this couple — sent to the AI as light
   /// context so tips build on what already worked for them (FR-48), never
-  /// full transcripts (NFR-6, minimal context). Filters client-side from a
-  /// plain orderBy query for the same index-free reason as [watchSessions].
-  Future<List<ProblemSession>> fetchRecentSolved(
+  /// full transcripts (NFR-6, minimal context). No status filter needed:
+  /// every doc in solvedProblems is, by definition, already solved.
+  Future<List<SolvedProblem>> fetchRecentSolved(
     String coupleId, {
     int limit = 5,
   }) async {
     final snap =
-        await _sessionsRef(
+        await _solvedProblemsRef(
           coupleId,
-        ).orderBy('updatedAt', descending: true).get();
-    return snap.docs
-        .map((d) => ProblemSession.fromMap(d.id, d.data()))
-        .where((s) => s.isSolved)
-        .take(limit)
-        .toList();
+        ).orderBy('createdAt', descending: true).limit(limit).get();
+    return snap.docs.map((d) => SolvedProblem.fromMap(d.id, d.data())).toList();
   }
 
-  /// [problemSummary]/[solution]/[tags] are the AI-generated record from
-  /// [AiCounselorService.summarize] — optional, since summarization is
-  /// skipped for short sessions or can fail without blocking the solve.
+  /// All solved-problem records for this couple, newest first.
+  Stream<List<SolvedProblem>> watchSolvedProblems(String coupleId) {
+    return _solvedProblemsRef(coupleId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snap) =>
+              snap.docs
+                  .map((d) => SolvedProblem.fromMap(d.id, d.data()))
+                  .toList(),
+        );
+  }
+
+  /// FR-48 solve flow: persists the AI-extracted record. Call only after the
+  /// user has confirmed it and BEFORE deleting the source session — the
+  /// caller must not delete the raw chat unless this succeeds.
+  Future<void> saveSolvedProblem({
+    required String coupleId,
+    required String sourceTitle,
+    required String problem,
+    required String solution,
+    required String impact,
+  }) {
+    return _solvedProblemsRef(coupleId).add({
+      'sourceTitle': sourceTitle,
+      'problem': problem,
+      'solution': solution,
+      'impact': impact,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Superseded by the extract/confirm/save/delete solve flow (which deletes
+  /// the session instead of marking it solved in place) — left for any
+  /// pre-existing sessions that already have status 'solved' from before.
   Future<void> markSolved({
     required String coupleId,
     required String sessionId,
