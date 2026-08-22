@@ -1,0 +1,7 @@
+flowchart TD
+    A([User sends a message]) --> B{Is the user asking for advice / a solution?}
+    B -->|No| C[Normal chat - no memory lookup]
+    B -->|Yes| D[Search the couple's solved problems]
+    D --> E[Find the relevant ones - tag / keyword overlap]
+    E --> F[Send ONLY the relevant solved records to the LLM]
+    F --> G([Generate personalised advice])

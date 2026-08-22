@@ -1,0 +1,52 @@
+---
+config:
+  layout: fixed
+---
+flowchart TB
+ subgraph CLIENT["Client - Flutter app (iOS / Android, Material 3)"]
+        UI["UI and screens"]
+        STATE["State and local cache"]
+        LISTEN["Real-time Firestore listeners"]
+  end
+ subgraph FIREBASE["Firebase - managed backend"]
+        AUTH["Firebase Auth<br>email, Google, Apple"]
+        FS[("Cloud Firestore<br>couple-scoped data")]
+        STORE[("Cloud Storage<br>photos / videos")]
+        FCM["Cloud Messaging - FCM<br>push / reminders"]
+  end
+ subgraph FUNCTIONS["Cloud Functions - Node.js serverless"]
+        AIPROXY["AI proxy<br>sendProblemMessage"]
+        SOLVE["Solve-extract fn<br>planned server-side"]
+        TITLE["Auto-title fn<br>planned server-side"]
+        ESCALATE["Emergency escalation<br>planned"]
+        SCHED["Scheduled jobs / unlink cleanup<br>planned"]
+  end
+ subgraph EXTERNAL["External providers - via Functions only"]
+        LLM["LLM API - Gemini"]
+        TELCO["SMS / Voice provider"]
+        SECRET["Secret Manager<br>API keys server-side"]
+  end
+    UI --> STATE
+    STATE --> LISTEN
+    LISTEN <--> FS
+    UI -- sign in --> AUTH
+    UI -- read / write --> FS
+    UI -- upload media --> STORE
+    UI -- call callable --> AIPROXY
+    AIPROXY -- verify membership,<br>load context --> FS
+    AIPROXY -- key from --> SECRET
+    AIPROXY -- prompt --> LLM
+    AIPROXY -- write reply --> FS
+    SOLVE -.-> FS & LLM
+    TITLE -.-> LLM
+    ESCALATE -.-> FCM & TELCO
+    SCHED -.-> FS
+    FCM -- notifications --> CLIENT
+    AUTH --> UI
+
+    style AIPROXY fill:#FFFFFF,stroke:#2E7D32,color:#2E7D32
+    style SECRET fill:#FFFFFF,stroke:#2E7D32,color:#2E7D32
+    style CLIENT fill:#EDE7E9,stroke:#9B2242
+    style FIREBASE fill:#F5F2F3,stroke:#5A6270
+    style FUNCTIONS fill:#F3E9EC,stroke:#9B2242
+    style EXTERNAL fill:#E7F0E8,stroke:#2E7D32
