@@ -46,3 +46,6 @@ app.*.map.json
 
 # Local secrets — never commit (see lib/core/secrets.example.dart)
 lib/core/secrets.dart
+
+# Firebase Cloud Functions
+functions/node_modules/

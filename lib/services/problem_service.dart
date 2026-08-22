@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/chat_message.dart';
 import '../models/problem_session.dart';
@@ -10,6 +11,9 @@ class ProblemService {
   ProblemService(this._db);
 
   final FirebaseFirestore _db;
+
+  FirebaseFunctions get _functions =>
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   CollectionReference<Map<String, dynamic>> _sessionsRef(String coupleId) => _db
       .collection(FirestorePaths.couples)
@@ -155,6 +159,20 @@ class ProblemService {
     await sessionDoc(coupleId, sessionId).update({
       'updatedAt': FieldValue.serverTimestamp(),
       'lastMessage': content,
+    });
+  }
+
+  Future<void> sendMessageToCounselor({
+    required String coupleId,
+    required String sessionId,
+    required String content,
+    required String senderName,
+  }) async {
+    await _functions.httpsCallable('sendProblemMessage').call({
+      'coupleId': coupleId,
+      'sessionId': sessionId,
+      'content': content,
+      'senderName': senderName,
     });
   }
 

@@ -11,14 +11,6 @@ import 'solved_problems_screen.dart';
 const _kBackground = Color(0xFFF3E8FF);
 const _kBubbleFromPartner = Color(0xFFE8E0F7);
 
-/// Matches the default title startSession() sets, e.g. "Problem 19/6/2026".
-/// Nothing in the current UI can rename a session's title otherwise, so
-/// this doubles as "has an auto-title not been generated yet" — a session
-/// is only ever titled once, right after its first user message.
-final _kDefaultTitlePattern = RegExp(r'^Problem \d{1,2}/\d{1,2}/\d{4}$');
-
-bool _hasDefaultTitle(String title) => _kDefaultTitlePattern.hasMatch(title);
-
 /// Which session a screen showing "the" chat should display: either a
 /// specific one (opened from the Chats list) or, when null, whichever is
 /// active and most recently updated — the original single-current-chat
@@ -926,8 +918,6 @@ class _InputBar extends ConsumerWidget {
     final text = controller.text.trim();
     if (text.isEmpty || isLoadingAI) return;
 
-    final isFirstMessage = _hasDefaultTitle(session.title);
-
     controller.clear();
     onLoadingChanged(true);
 
@@ -935,63 +925,12 @@ class _InputBar extends ConsumerWidget {
     final myName =
         ref.read(firebaseAuthProvider).currentUser?.displayName ?? 'You';
 
-    await problemService.addMessage(
-      coupleId: coupleId,
-      sessionId: session.id,
-      role: 'user',
-      content: text,
-      senderUid: myUid,
-      senderName: myName,
-    );
-
-    if (isFirstMessage) {
-      // Best-effort, once per session: a failure here must never surface as
-      // an "AI error" (that's specifically about the reply below) and must
-      // never block sending — the date-based default title is a fine
-      // fallback either way.
-      try {
-        final title = await ref
-            .read(aiCounselorServiceProvider)
-            .generateTitle(text);
-        if (title != null) {
-          await problemService.updateTitle(
-            coupleId: coupleId,
-            sessionId: session.id,
-            title: title,
-          );
-        }
-      } catch (_) {
-        // Keep the default title.
-      }
-    }
-
     try {
-      final priorMessages =
-          ref
-              .read(
-                problemMessagesProvider((
-                  coupleId: coupleId,
-                  sessionId: session.id,
-                )),
-              )
-              .valueOrNull ??
-          const [];
-      final recentSolved = await problemService.fetchRecentSolved(coupleId);
-
-      final aiText = await ref
-          .read(aiCounselorServiceProvider)
-          .reply(
-            message: text,
-            priorMessages: priorMessages,
-            recentSolved: recentSolved,
-          );
-
-      await problemService.addMessage(
+      await problemService.sendMessageToCounselor(
         coupleId: coupleId,
         sessionId: session.id,
-        role: 'model',
-        content: aiText,
-        senderName: 'AI Counselor',
+        content: text,
+        senderName: myName,
       );
     } catch (e) {
       if (context.mounted) {
