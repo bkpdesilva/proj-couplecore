@@ -1,62 +1,39 @@
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
-import '../core/secrets.dart';
-import '../models/chat_message.dart';
-import '../models/problem_session.dart';
+/// The structured record [AiCounselorService.extractSolvedRecord] produces
+/// when a problem is solved — persisted to solvedProblems, then the raw chat
+/// is deleted, so this (plus [sourceTitle]) is all that survives (NFR-6).
+typedef SolvedRecord = ({String problem, String solution, String impact});
 
-/// FR-48: sends the couple's problem context to Gemini and returns tailored
-/// communication tips / calming steps.
-///
-/// Known gap (tracked as a follow-up, not fixed by this port): this calls
-/// the Gemini API directly from the client using [kGeminiApiKey], not via a
-/// server-side Cloud Function proxy. NFR-6 calls for the key to live
-/// server-side only — see lib/core/secrets.example.dart for local setup in
-/// the meantime.
 class AiCounselorService {
   const AiCounselorService();
 
-  static const _systemPreamble =
-      'You are a compassionate relationship counselor AI helping a couple '
-      'work through their problems together. Both partners share this '
-      'conversation — give balanced, empathetic advice that considers both '
-      'perspectives equally. Be practical, concise, and constructive. Avoid '
-      'taking sides. Draw on the couple\'s previous solved problems to give '
-      'more personalised guidance.';
-
-  Future<String> reply({
-    required String message,
-    required List<ChatMessage> priorMessages,
-    required List<ProblemSession> recentSolved,
+  /// FR-48: on Solve, extract a structured problem/solution/impact record
+  /// from the session's messages. Returns null on any failure (bad/missing
+  /// JSON, network error, empty fields) — the caller must show an error and
+  /// leave the chat untouched rather than save a blank record or delete it.
+  Future<SolvedRecord?> extractSolvedRecord({
+    required String coupleId,
+    required String sessionId,
   }) async {
-    final history =
-        priorMessages
-            .map(
-              (m) =>
-                  m.isFromAi
-                      ? Content.model([TextPart(m.content)])
-                      : Content.text(m.content),
-            )
-            .toList();
-
-    final model = GenerativeModel(
-      model: 'gemini-3.6-flash',
-      apiKey: kGeminiApiKey,
-      systemInstruction: Content.system(
-        '$_systemPreamble${_pastContext(recentSolved)}',
-      ),
-    );
-
-    final chat = model.startChat(history: history);
-    final response = await chat.sendMessage(Content.text(message));
-    return response.text ?? 'Unable to generate a response. Please try again.';
-  }
-
-  String _pastContext(List<ProblemSession> recentSolved) {
-    if (recentSolved.isEmpty) return '';
-    final lines = recentSolved
-        .map((s) => '- ${s.title}: ${s.lastMessage}')
-        .join('\n');
-    return '\n\nPrevious solved problems from this couple (use for context '
-        'to give personalised advice):\n$lines';
+    try {
+      final result = await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('solveProblemSummary')
+          .call({'coupleId': coupleId, 'sessionId': sessionId});
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final problem = data['problem'] as String?;
+      final solution = data['solution'] as String?;
+      final impact = data['impact'] as String?;
+      if (problem == null ||
+          problem.isEmpty ||
+          solution == null ||
+          solution.isEmpty ||
+          impact == null ||
+          impact.isEmpty)
+        return null;
+      return (problem: problem, solution: solution, impact: impact);
+    } catch (_) {
+      return null;
+    }
   }
 }

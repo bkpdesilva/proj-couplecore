@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/chat_message.dart';
 import '../models/problem_session.dart';
+import '../models/solved_problem.dart';
 import 'firestore_paths.dart';
 
 /// FR-47/48: AI-assisted problem-solving sessions, scoped per couple.
@@ -9,6 +11,9 @@ class ProblemService {
   ProblemService(this._db);
 
   final FirebaseFirestore _db;
+
+  FirebaseFunctions get _functions =>
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   CollectionReference<Map<String, dynamic>> _sessionsRef(String coupleId) => _db
       .collection(FirestorePaths.couples)
@@ -24,6 +29,13 @@ class ProblemService {
     String coupleId,
     String sessionId,
   ) => sessionDoc(coupleId, sessionId).collection(FirestorePaths.messages);
+
+  CollectionReference<Map<String, dynamic>> _solvedProblemsRef(
+    String coupleId,
+  ) => _db
+      .collection(FirestorePaths.couples)
+      .doc(coupleId)
+      .collection(FirestorePaths.solvedProblems);
 
   /// All sessions, newest-updated first. Providers/UI split this into the
   /// active session and the solved history client-side — per-couple session
@@ -53,6 +65,12 @@ class ProblemService {
         );
   }
 
+  /// Normal (unsolved) sessions kept per couple — the oldest beyond this
+  /// are auto-evicted right after a new one is created. Solved chats don't
+  /// count against this: the Solve flow already deletes their raw session
+  /// as soon as it's saved to solvedProblems, so they never accumulate here.
+  static const _kMaxNormalSessions = 5;
+
   Future<String> startSession({
     required String coupleId,
     required String createdByUid,
@@ -67,7 +85,60 @@ class ProblemService {
       'updatedAt': FieldValue.serverTimestamp(),
       'lastMessage': '',
     });
+    await _evictOldNormalSessions(coupleId);
     return ref.id;
+  }
+
+  /// Hard-deletes the oldest normal sessions beyond [_kMaxNormalSessions],
+  /// oldest-created first. Saves nothing — no extraction, no LLM call; this
+  /// is pure discard, unlike the Solve flow. Only ever queries/deletes
+  /// couples/{coupleId}/problemSessions — never touches solvedProblems.
+  ///
+  /// Eligibility is filtered BEFORE the newest-5 cutoff is applied, not
+  /// after: solved sessions (safety net — the Solve flow never leaves one
+  /// behind to find here) and starred sessions are excluded from the
+  /// eligible list first, then the 5 newest of what's left are kept. A
+  /// starred session therefore never occupies one of the 5 slots and never
+  /// ages into deletion, no matter how old it gets.
+  ///
+  /// Reuses [deleteSession] so messages are cascade-deleted, same as any
+  /// other session deletion. Best-effort throughout: a failure here
+  /// (network, permissions, a session already gone) must never block
+  /// session creation, so every failure mode is swallowed after being
+  /// skipped.
+  Future<void> _evictOldNormalSessions(String coupleId) async {
+    try {
+      final snap =
+          await _sessionsRef(
+            coupleId,
+          ).orderBy('createdAt', descending: true).get();
+      final eligible = snap.docs.where((d) {
+        final data = d.data();
+        final isSolved = (data['status'] as String?) == 'solved';
+        final isStarred = (data['starred'] as bool?) == true;
+        return !isSolved && !isStarred;
+      });
+      final toEvict = eligible.skip(_kMaxNormalSessions);
+      for (final doc in toEvict) {
+        try {
+          await deleteSession(coupleId: coupleId, sessionId: doc.id);
+        } catch (_) {
+          // Best-effort — leave this one for the next eviction pass.
+        }
+      }
+    } catch (_) {
+      // Best-effort — must never block session creation.
+    }
+  }
+
+  /// Toggles the star that protects a session from newest-5 auto-eviction
+  /// (see [_evictOldNormalSessions]) — independent of solved/active status.
+  Future<void> setStarred({
+    required String coupleId,
+    required String sessionId,
+    required bool starred,
+  }) {
+    return sessionDoc(coupleId, sessionId).update({'starred': starred});
   }
 
   Future<void> addMessage({
@@ -91,33 +162,85 @@ class ProblemService {
     });
   }
 
-  /// Recently solved sessions for this couple — sent to the AI as light
+  Future<void> sendMessageToCounselor({
+    required String coupleId,
+    required String sessionId,
+    required String content,
+    required String senderName,
+  }) async {
+    await _functions.httpsCallable('sendProblemMessage').call({
+      'coupleId': coupleId,
+      'sessionId': sessionId,
+      'content': content,
+      'senderName': senderName,
+    });
+  }
+
+  /// Recently solved problems for this couple — sent to the AI as light
   /// context so tips build on what already worked for them (FR-48), never
-  /// full transcripts (NFR-6, minimal context). Filters client-side from a
-  /// plain orderBy query for the same index-free reason as [watchSessions].
-  Future<List<ProblemSession>> fetchRecentSolved(
+  /// full transcripts (NFR-6, minimal context). No status filter needed:
+  /// every doc in solvedProblems is, by definition, already solved.
+  Future<List<SolvedProblem>> fetchRecentSolved(
     String coupleId, {
     int limit = 5,
   }) async {
     final snap =
-        await _sessionsRef(
+        await _solvedProblemsRef(
           coupleId,
-        ).orderBy('updatedAt', descending: true).get();
-    return snap.docs
-        .map((d) => ProblemSession.fromMap(d.id, d.data()))
-        .where((s) => s.isSolved)
-        .take(limit)
-        .toList();
+        ).orderBy('createdAt', descending: true).limit(limit).get();
+    return snap.docs.map((d) => SolvedProblem.fromMap(d.id, d.data())).toList();
   }
 
+  /// All solved-problem records for this couple, newest first.
+  Stream<List<SolvedProblem>> watchSolvedProblems(String coupleId) {
+    return _solvedProblemsRef(coupleId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snap) =>
+              snap.docs
+                  .map((d) => SolvedProblem.fromMap(d.id, d.data()))
+                  .toList(),
+        );
+  }
+
+  /// FR-48 solve flow: persists the AI-extracted record. Call only after the
+  /// user has confirmed it and BEFORE deleting the source session — the
+  /// caller must not delete the raw chat unless this succeeds.
+  Future<void> saveSolvedProblem({
+    required String coupleId,
+    required String sourceTitle,
+    required String problem,
+    required String solution,
+    required String impact,
+  }) {
+    return _solvedProblemsRef(coupleId).add({
+      'sourceTitle': sourceTitle,
+      'problem': problem,
+      'solution': solution,
+      'impact': impact,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Superseded by the extract/confirm/save/delete solve flow (which deletes
+  /// the session instead of marking it solved in place) — left for any
+  /// pre-existing sessions that already have status 'solved' from before.
   Future<void> markSolved({
     required String coupleId,
     required String sessionId,
+    String? problemSummary,
+    String? solution,
+    List<String>? tags,
   }) {
-    return sessionDoc(
-      coupleId,
-      sessionId,
-    ).update({'status': 'solved', 'solvedAt': FieldValue.serverTimestamp()});
+    final updates = <String, dynamic>{
+      'status': 'solved',
+      'solvedAt': FieldValue.serverTimestamp(),
+    };
+    if (problemSummary != null) updates['problemSummary'] = problemSummary;
+    if (solution != null) updates['solution'] = solution;
+    if (tags != null) updates['tags'] = tags;
+    return sessionDoc(coupleId, sessionId).update(updates);
   }
 
   Future<void> unmarkSolved({

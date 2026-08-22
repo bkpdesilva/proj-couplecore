@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/chat_message.dart';
 import '../models/couple.dart';
 import '../models/problem_session.dart';
+import '../models/solved_problem.dart';
 import '../models/user_profile.dart';
 import '../services/ai_counselor_service.dart';
 import '../services/alert_service.dart';
@@ -84,6 +85,13 @@ final moodStreamProvider = StreamProvider.family<
 final problemSessionsProvider =
     StreamProvider.family<List<ProblemSession>, String>((ref, coupleId) {
       return ref.watch(problemServiceProvider).watchSessions(coupleId);
+    });
+
+/// All of the couple's solved-problem records (FR-48) — the structured
+/// summaries that survive after a problem's raw chat is deleted on solve.
+final solvedProblemsProvider =
+    StreamProvider.family<List<SolvedProblem>, String>((ref, coupleId) {
+      return ref.watch(problemServiceProvider).watchSolvedProblems(coupleId);
     });
 
 typedef ProblemMessagesQuery = ({String coupleId, String sessionId});
