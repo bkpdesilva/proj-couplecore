@@ -336,20 +336,9 @@ class _ActiveSessionActions extends ConsumerWidget {
     ProblemSession active,
   ) async {
     final problemService = ref.read(problemServiceProvider);
-    final messages =
-        ref
-            .read(
-              problemMessagesProvider((
-                coupleId: coupleId,
-                sessionId: active.id,
-              )),
-            )
-            .valueOrNull ??
-        const [];
-
     final record = await ref
         .read(aiCounselorServiceProvider)
-        .extractSolvedRecord(messages);
+        .extractSolvedRecord(coupleId: coupleId, sessionId: active.id);
     if (record == null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

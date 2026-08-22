@@ -42,7 +42,6 @@ dependencies:
   firebase_messaging: ^16.5.0
   cloud_firestore: ^6.8.0
   cloud_functions: ^6.0.0
-  google_generative_ai: ^0.4.7
   flutter_riverpod: ^2.5.1
   google_sign_in: ^6.2.1
   sign_in_with_apple: ^6.1.0
