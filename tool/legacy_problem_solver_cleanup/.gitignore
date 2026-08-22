@@ -1,0 +1,4 @@
+node_modules/
+package-lock.json
+# Contains real user relationship data (problem/solution text) — never commit.
+report.json

@@ -1,0 +1,9 @@
+{
+  "name": "legacy-problem-solver-cleanup",
+  "private": true,
+  "type": "module",
+  "description": "One-time report + migration scripts for legacy Problem Solver sessions (status='solved' docs left behind by the old solve flow that never deleted the raw chat). See README.md.",
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}
